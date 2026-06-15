@@ -11,10 +11,8 @@ locals {
   kf_version  = "" # Desired version of Apache Kafka®. For available versions, see the documentation main page: https://yandex.cloud/en/docs/managed-kafka/.
   kf_password = "" # Apache Kafka® user's password
 
-  # Specify these settings ONLY AFTER the clusters are created. Then run "terraform apply" command again.
-  # You should set up endpoints using the GUI to obtain their IDs
-  kf_source_endpoint_id = "" # Set the source endpoint ID
-  transfer_enabled      = 0  # Set to 1 to enable the transfer
+  # Specify this setting ONLY AFTER the clusters are created. Then run "terraform apply" command again.
+  transfer_enabled = 0  # Set to 1 to enable the transfer
 
   # The following settings are predefined. Change them only if necessary.
 
@@ -35,6 +33,7 @@ locals {
   kf_username             = "mkf-user"           # Username of the Apache Kafka® cluster
 
   # Data Transfer:
+  source_endpoint_name    = "kf-source-tf"     # Name of the target endpoint for the Managed Service for Apache Kafka®
   target_endpoint_name    = "pg-target-tf"     # Name of the target endpoint for the Managed Service for PostgreSQL
   transfer_name           = "mkf-mpg-transfer" # Name of the transfer from the Managed Service for Apache Kafka® to the Managed Service for PostgreSQL
 }
@@ -223,11 +222,80 @@ resource "yandex_datatransfer_endpoint" "pg_target" {
   }
 }
 
+resource "yandex_datatransfer_endpoint" "kf_source" {
+  description = "Source endpoint for the Managed Service for Apache Kafka® cluster"
+  count       = local.transfer_enabled
+  name        = local.source_endpoint_name
+  settings {
+    kafka_source {
+      connection {
+        cluster_id = yandex_mdb_kafka_cluster.mkf-cluster.id
+      }
+      auth {
+        sasl {
+          user = yandex_mdb_kafka_user.mkf-user.name
+          password {
+            raw = local.kf_password
+          }
+        }
+      }
+      topic_names = [
+        yandex_mdb_kafka_topic.sensors.name
+      ]
+      parser {
+        json_parser {
+          data_schema {
+            fields {
+              fields {
+                name = "device_id"
+                type = "UTF8"
+                key  = true
+                }
+              fields {
+                name = "datetime"
+                type = "UTF8"
+              }
+              fields {
+                name = "latitude"
+                type = "DOUBLE"
+              }
+              fields {
+                name = "longitude"
+                type = "DOUBLE"
+              }
+              fields {
+                name = "altitude"
+                type = "DOUBLE"
+              }
+              fields {
+                name = "speed"
+                type = "DOUBLE"
+              }
+              fields {
+                name = "battery_voltage"
+                type = "DOUBLE"
+              }
+              fields {
+                name = "cabin_temperature"
+                type = "UINT16"
+              }
+              fields {
+                name = "fuel_level"
+                type = "UINT16"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 resource "yandex_datatransfer_transfer" "mkf-mpg-transfer" {
   description = "Transfer from the Managed Service for Apache Kafka® to the Managed Service for PostgreSQL"
   count       = local.transfer_enabled
   name        = local.transfer_name
-  source_id   = local.kf_source_endpoint_id
+  source_id   = yandex_datatransfer_endpoint.kf_source[count.index].id
   target_id   = yandex_datatransfer_endpoint.pg_target[count.index].id
   type        = "INCREMENT_ONLY" # Data replication from the source Managed Service for Apache Kafka® topic to the target Managed Service for PostgreSQL cluster
 }
